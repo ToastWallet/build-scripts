@@ -4,7 +4,7 @@
 # You should provide a code signing certificate in the same directory as this script called codesign.p12
 # You should provide the password for this certifcate as the only argument to this script
 #
-# Version: 1.0
+# Version: 1.1
 # Date: 28 July 2019
 # Author: Richard Holland
 
@@ -18,16 +18,16 @@ TWC=`pwd`/core/
 EBFLAGS='-w'
 
 #enables useful debugging output in electon builder
-DEBUG=electron-builder,electron-builder:*
+export DEBUG=electron-builder,electron-builder:*
 
-#change these as needed for your certificate
-CSC_LINK=../../../codesign.p12
-CSC_KEY_PASSWORD=$1
+#change these as needed for your certificate; the path is relative to the build output, ../../.. = ./
+export CSC_LINK=../../../codesign.p12
+export CSC_KEY_PASSWORD=$1
 
 if [ -z "$1" ]; then echo "Must supply certificate password as argument"; exit; fi
 
-stat core
-if [ "$?" -eq "0"]; then
+stat core > /dev/null 2> /dev/null
+if [ "$?" -eq "0" ]; then
         echo "`pwd`/core exists, assuming this is the Toast Wallet core folder..."
 else
         echo "can't find core folder, cloning repo..."
