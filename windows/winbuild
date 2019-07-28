@@ -1,0 +1,93 @@
+#!/bin/bash
+# Windows build script for Toast Wallet, for use with GitBash on Windows.
+# Will try to use ./core/ as basis for building browser version and then electron build from browser version
+# You should provide a code signing certificate in the same directory as this script called codesign.p12
+# You should provide the password for this certifcate as the only argument to this script
+#
+# Version: 1.0
+# Date: 28 July 2019
+# Author: Richard Holland
+
+#location where appx manifest template is pulled from and modified
+MF=~/node_modules/app-builder-lib/templates/appx
+
+#path to the toast repo
+TWC=`pwd`/core/
+
+#flags to run with electon builder
+EBFLAGS='-w'
+
+#enables useful debugging output in electon builder
+DEBUG=electron-builder,electron-builder:*
+
+#change these as needed for your certificate
+CSC_LINK=../../../codesign.p12
+CSC_KEY_PASSWORD=$1
+
+if [ -z "$1" ]; then echo "Must supply certificate password as argument"; exit; fi
+
+stat core
+if [ "$?" -eq "0"]; then
+        echo "`pwd`/core exists, assuming this is the Toast Wallet core folder..."
+else
+        echo "can't find core folder, cloning repo..."
+        git clone https://github.com/ToastWallet/core.git core
+fi
+
+cd core
+# remove env css which android/PC can't handle
+if [[ "`cat www/css/app.css | grep 'env(' | wc -l`" -gt "0" ]]; then
+    mv www/css/app.css www/css/_app.css
+    cat www/css/_app.css | sed -r 's/ *[-\+] *env\([^\)]+\)//img' > www/css/app.css
+fi
+
+#this plugin often causes problems due to its dangling URL_SCHEME variable, readding it each build is hacky and effective
+phonegap plugin add cordova-plugin-customurlscheme --variable URL_SCHEME=xrpl
+phonegap build browser
+
+#transfer needed additional files to the browser build
+cp manifest.webapp platforms/browser/
+cp electron-start.js platforms/browser/
+cp electron_package.json platforms/browser/package.json
+cd platforms/browser
+
+#clean up any existing build and unwanted additional index.html that sits www/../
+rm -rf build index.html dist
+
+#we need to modify the 'capabilities' the electron builder will send to the appx builder, however there is no easy way to do this
+#so we'll just do some file juggling with sed
+mkdir appxAssets
+cp  ../../www/res/electron/* appxAssets/
+mv $MF/_appxmanifest.xml $MF/appxmanifest.xml
+mv $MF/appxmanifest.xml $MF/_appxmanifest.xml
+cat $MF/_appxmanifest.xml | sed 's/<rescap:Capability Name="runFullTrust"\/>/<rescap:Capability Name="runFullTrust"\/><Capability Name="internetClient" \/><DeviceCapability Name="webcam" \/>/gi' | sed 's/EntryPoint="Windows.FullTrustApplication"/EntryPoint="Windows.FullTrustApplication"/gi' > $MF/appxmanifest.xml
+
+#build the appx
+electron-builder $EBFLAGS
+
+#modify the package.json to change the build type to portable exe
+mv package.json _package.json
+cat _package.json | sed 's/:.*"appx"/: "portable"/gi' > package.json
+
+#build portable exe
+electron-builder $EBFLAGS
+
+#modify the package.json to change the build type to classic windows exe installer
+rm package.json
+cat _package.json | sed 's/:.*"appx"/: "nsis"/gi' > package.json
+
+#build classic windows installer
+electron-builder $EBFLAGS
+
+#clean up
+rm package.json
+rm $MF/appxmanifest.xml
+mv $MF/_appxmanifest.xml $MF/appxmanifest.xml
+cd ../../..
+
+rm -rf appxAssets
+
+# NB to be patched on older versions of electon-builder
+# To allow non-default assets in build
+# ~\AppData\Local\Yarn\config\global\node_modules\electron-builder\out\targets\appx.js:134
+# (0, (_fs || _load_fs()).copyFile)(_path.join(preAppx, "../../appxAssets", defaultAsset), _path.join(preAppx, "assets", defaultAsset))
