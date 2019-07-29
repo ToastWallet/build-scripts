@@ -4,7 +4,7 @@
 # You should provide a code signing certificate in the same directory as this script called codesign.p12
 # You should provide the password for this certifcate as the only argument to this script
 #
-# Version: 1.1
+# Version: 1.2
 # Date: 28 July 2019
 # Author: Richard Holland
 
@@ -12,7 +12,7 @@
 MF=~/node_modules/app-builder-lib/templates/appx
 
 #path to the toast repo
-TWC=`pwd`/core/
+TWC=`pwd`/core
 
 #flags to run with electon builder
 EBFLAGS='-w'
@@ -20,21 +20,23 @@ EBFLAGS='-w'
 #enables useful debugging output in electon builder
 export DEBUG=electron-builder,electron-builder:*
 
-#change these as needed for your certificate; the path is relative to the build output, ../../.. = ./
+#change these as needed for your certificate
 export CSC_LINK=../../../codesign.p12
 export CSC_KEY_PASSWORD=$1
 
 if [ -z "$1" ]; then echo "Must supply certificate password as argument"; exit; fi
 
-stat core > /dev/null 2> /dev/null
+#clone the repo if needed
+stat core >> /dev/null 2>&1
 if [ "$?" -eq "0" ]; then
-        echo "`pwd`/core exists, assuming this is the Toast Wallet core folder..."
+	echo "`pwd`/core exists, assuming this is the Toast Wallet core folder..."
 else
-        echo "can't find core folder, cloning repo..."
-        git clone https://github.com/ToastWallet/core.git core
+	echo "can't find core folder, cloning repo..."
+	git clone https://github.com/ToastWallet/core.git core
 fi
 
 cd core
+
 # remove env css which android/PC can't handle
 if [[ "`cat www/css/app.css | grep 'env(' | wc -l`" -gt "0" ]]; then
     mv www/css/app.css www/css/_app.css
@@ -51,14 +53,18 @@ cp electron-start.js platforms/browser/
 cp electron_package.json platforms/browser/package.json
 cd platforms/browser
 
+
 #clean up any existing build and unwanted additional index.html that sits www/../
 rm -rf build index.html dist
 
+#copy assets to a place that electron builder can find them
+mkdir build
+mkdir build/appx
+cp  $TWC/www/res/electron/* build/appx/
+
 #we need to modify the 'capabilities' the electron builder will send to the appx builder, however there is no easy way to do this
 #so we'll just do some file juggling with sed
-mkdir appxAssets
-cp  ../../www/res/electron/* appxAssets/
-mv $MF/_appxmanifest.xml $MF/appxmanifest.xml
+mv $MF/_appxmanifest.xml $MF/appxmanifest.xml 
 mv $MF/appxmanifest.xml $MF/_appxmanifest.xml
 cat $MF/_appxmanifest.xml | sed 's/<rescap:Capability Name="runFullTrust"\/>/<rescap:Capability Name="runFullTrust"\/><Capability Name="internetClient" \/><DeviceCapability Name="webcam" \/>/gi' | sed 's/EntryPoint="Windows.FullTrustApplication"/EntryPoint="Windows.FullTrustApplication"/gi' > $MF/appxmanifest.xml
 
@@ -84,10 +90,3 @@ rm package.json
 rm $MF/appxmanifest.xml
 mv $MF/_appxmanifest.xml $MF/appxmanifest.xml
 cd ../../..
-
-rm -rf appxAssets
-
-# NB to be patched on older versions of electon-builder
-# To allow non-default assets in build
-# ~\AppData\Local\Yarn\config\global\node_modules\electron-builder\out\targets\appx.js:134
-# (0, (_fs || _load_fs()).copyFile)(_path.join(preAppx, "../../appxAssets", defaultAsset), _path.join(preAppx, "assets", defaultAsset))
