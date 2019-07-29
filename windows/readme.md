@@ -1,8 +1,10 @@
 # Windows Build Script
 ## Requirements
 
- - Git Bash
+ - Install Git Bash
+ - Install npm
  - npm install -g electron-builder@19.19.1
+ - npm install -g phonegap@8.2.2
  - p12 code signing certificate (if you want code signing)
 
 Due to various breaking changes between Microsoft's toolchains, electron and electron builder this script only signs appx correctly on electron-builder 19.19.1. Please ensure you use this version if you need a signed appx.
