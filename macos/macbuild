@@ -1,0 +1,76 @@
+#!/bin/bash
+# This is an DMG builder for ToastWallet on MacOS
+# Version: 1.0
+# Date: 30 July 2019
+# Author: Richard Holland
+
+#flags to run with electon builder
+EBFLAGS='-m'
+
+#enables useful debugging output in electon builder
+export DEBUG=electron-builder,electron-builder:*
+
+#change these as needed for your certificate
+export CSC_LINK=../../../codesign.p12
+export CSC_KEY_PASSWORD=$1
+
+if [ -z "$1" ]; then echo "Must supply certificate password as argument"; exit; fi
+
+#hdiutil on modern macos versions has a race condition that locks it up when multiple threads
+#solution from https://github.com/electron-userland/electron-builder/issues/2115#issuecomment-332107598
+echo '#!/bin/sh
+if [ "$1" = create ]; then
+   tmpdir=$(mktemp -d /tmp/hdiutil.XXXXX)
+   shift 1
+   while [ X"$1" = X"-srcfolder" ]
+   do
+	cp -pr $2 ${tmpdir}/.
+	shift 2 	 
+   done
+   exec /usr/bin/hdiutil create -srcfolder ${tmpdir} ${1+"$@"}
+else
+   exec /usr/bin/hdiutil ${1+"$@"}
+fi' > hdiutil
+chmod 700 hdiutil
+export PATH=`pwd`:$PATH
+
+#clone the repo if needed
+stat core > /dev/null 2>&1
+if [ "$?" -eq "0" ]; then
+	echo "`pwd`/core exists, assuming this is the Toast Wallet core folder..."
+else
+	echo "can't find core folder, cloning repo..."
+	git clone https://github.com/ToastWallet/core.git core
+fi
+
+cd core
+
+# remove env css which android/PC can't handle
+if [[ "`cat www/css/app.css | grep 'env(' | wc -l`" -gt "0" ]]; then
+	mv www/css/app.css www/css/_app.css
+	cat www/css/_app.css | sed -E 's/ *[-\+] *env\([^\)]+\)//g' > www/css/app.css
+fi
+
+#this plugin often causes problems due to its dangling URL_SCHEME variable, readding it each build is hacky and effective
+phonegap plugin add cordova-plugin-customurlscheme --variable URL_SCHEME=xrpl
+phonegap build browser
+
+mv www/css/_app.css www/css/app.css
+
+#copy the electron package.json to where electron builder can find it
+cp electron_package.json platforms/browser/package.json
+cp manifest.webapp electron-start.js platforms/browser/
+
+cd platforms/browser
+
+#clean up any existing build and unwanted additional index.html that sits www/../
+rm -rf build index.html dist
+
+#build
+electron-builder $EBFLAGS
+
+cd ../../../
+
+#cleanup hdiutil script
+rm hdiutil
+
