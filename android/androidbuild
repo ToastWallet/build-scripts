@@ -1,0 +1,147 @@
+#!/bin/bash
+# Build sciprt for Toast Wallet ANDROID APKs
+# Notes:
+# 1. You will need android studio, pcregrep and zip installed
+# 2. To build release version specify a java keystore containing your upload certificate as the first argument, or no arguments to build debug apk
+# 3. This script was written and has only been tested on a mac, theoretically it should work on windows with gitbash or linux too
+# Version: 1.0
+# Date: 6 August 2019
+# Author: Richard Holland
+
+export AKS=
+if [ -z "$1" ]; then
+    echo "No keystore was provided for signing, assuming you only want to build the debug apk."
+else
+    if [ "echo $1 | head -c 1" -eq "/" ]; then
+        export AKS=$1
+    else
+        export AKS=`pwd`/$1
+    fi
+    echo 'keystore file = ' $AKS
+fi
+
+
+which pcregrep > /dev/null 2>&1
+if [ "$?" -gt "0" ]; then
+    echo 'This build script requires pcregrep to run. Please install it first.'
+    exit
+fi
+
+which zip > /dev/null 2>&1
+if [ "$?" -gt "0" ]; then
+    echo 'This build script requires zip to run. Please install it first.'
+    exit
+fi
+
+#if you're doing a release build you're in for a world of hurt, see if you can round these utils up on your system
+if [ ! -z "$AKS" ]; then
+
+if [ -z "$ANDROID_HOME" ]; then
+    stat /Users/$USER/Library/Android/sdk/ > /dev/null 2>&1
+    if [ "$?" -gt "0" ]; then 
+        echo 'You must define $ANDROID_HOME, e.g. export ANDROID_HOME=/Users/$USER/Library/Android/sdk'
+        exit
+    else
+        export ANDROID_HOME=/Users/$USER/Library/Android/sdk
+    fi
+fi
+
+export ZIPALIGN=`find $ANDROID_HOME | grep zipalign | head -n 1`
+if [ -z "$ZIPALIGN" ]; then
+    export ZIPALIGN=`which zipalign`
+    if [ -z "$ZIPALIGN" ]; then
+        echo 'This build script requires zipalign to run, but could not find it in your ANDROID_HOME. Please reinstall android sdk first.'
+        exit
+    fi
+fi
+
+
+export APKSIGNER=`find $ANDROID_HOME | grep apksigner | grep -vE '\.jar$'`
+if [ -z "$APKSIGNER" ]; then
+    export APKSIGNER=`which apksigner`
+    if [ -z "$APKSIGNER" ]; then
+        echo 'This build script requires apksigner to run, but could not find it in your ANDROID_HOME. Please reinstall android sdk first.'
+        exit
+    fi
+fi
+
+fi
+
+#clone the repo if needed
+stat core > /dev/null 2>&1
+if [ "$?" -eq "0" ]; then
+    echo "`pwd`/core exists, assuming this is the Toast Wallet core folder..."
+else
+    echo "can't find core folder, cloning repo..."
+    git clone https://github.com/ToastWallet/core.git core
+fi
+
+cd core
+
+TWC=`pwd`
+
+#for whatever reason this needs to be reinstalled everytime a build happens?
+npm install xml2js
+
+# remove env css which android/PC can't handle
+if [[ "`cat www/css/app.css | grep 'env(' | wc -l`" -gt "0" ]]; then
+    mv www/css/app.css www/css/_app.css
+    cat www/css/_app.css | sed -E 's/ *[-\+] *env\([^\)]+\)//g' > www/css/app.css
+fi
+
+#remove this plugin as it doesn't compile with android despite being a dependency for the clipboard v2 plugin?
+cd plugins
+mv fetch.json _fetch.json
+mv android.json _android.json
+cat _fetch.json | pcregrep -Mv '"com.verso.cordova.clipboard":[^{]*{([^{}]*{[^{}]*})*[^}]*}' > fetch.json
+cat _android.json | pcregrep -Mv '"com.verso.cordova.clipboard": {[^}]+}' > android.json
+rm -rf com.verso.cordova.clipboard
+rm -rf cordova-plugin-compat
+cd $TWC
+
+
+#remove android platform target if it exists
+rm -rf platforms/android
+
+#add this plugin again because its variable often causes issues
+phonegap plugin add cordova-plugin-customurlscheme --variable URL_SCHEME=xrpl
+phonegap plugin add cordova-android-support-gradle-release --fetch
+#add android platform at the correct level
+phonegap platform add android@6.4.0
+
+#add this because android 6.4.0 has random breaking changes
+echo 'android { 
+    flavorDimensions "default"
+}' > platforms/android/build-extras.gradle
+
+
+if [ -z "$AKS" ]; then
+
+#build debug
+phonegap build android --debug 
+
+#if we were only doing a debug build we're finished now
+echo 'Debug build should be in ' $TWC/platforms/android/build/outputs/apk/armv7/debug
+
+else
+
+#this is a release build... the fun is only just getting started
+
+#build release
+phonegap build android --release
+
+#we need to align and sign the release apk
+RBD=$TWC/platforms/android/build/outputs/apk/armv7/release
+
+#remove the existing manifest from the unsigned release apk
+zip -d $RBD/android-armv7-release-unsigned.apk META-INF/*
+
+#align
+$ZIPALIGN -v 4 $RBD/android-armv7-release-unsigned.apk $RBD/android-armv7-release-unsigned-aligned.apk
+
+#sign
+$APKSIGNER sign -ks $AKS --out $RBD/android-armv7-release-signed.apk $RBD/android-armv7-release-unsigned-aligned.apk
+
+echo 'If all went well your signed and aligned released apk should be here: ' $RBD/android-armv7-release-signed.apk
+
+fi
