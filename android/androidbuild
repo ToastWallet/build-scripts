@@ -4,8 +4,8 @@
 # 1. You will need android studio, pcregrep and zip installed
 # 2. To build release version specify a java keystore containing your upload certificate as the first argument, or no arguments to build debug apk
 # 3. This script was written and has only been tested on a mac, theoretically it should work on windows with gitbash or linux too
-# Version: 1.0
-# Date: 6 August 2019
+# Version: 1.1
+# Date: 27 Sept 2019
 # Author: Richard Holland
 
 export AKS=
@@ -91,12 +91,11 @@ fi
 
 #remove this plugin as it doesn't compile with android despite being a dependency for the clipboard v2 plugin?
 cd plugins
-mv fetch.json _fetch.json
-mv android.json _android.json
-cat _fetch.json | pcregrep -Mv '"com.verso.cordova.clipboard":[^{]*{([^{}]*{[^{}]*})*[^}]*}' > fetch.json
-cat _android.json | pcregrep -Mv '"com.verso.cordova.clipboard": {[^}]+}' > android.json
 rm -rf com.verso.cordova.clipboard
 rm -rf cordova-plugin-compat
+rm -rf cordova-plugin-build-architecture
+echo {} > android.json
+echo {} > fetch.json
 cd $TWC
 
 
@@ -114,6 +113,8 @@ echo 'android {
     flavorDimensions "default"
 }' > platforms/android/build-extras.gradle
 
+
+phonegap plugin add https://github.com/MBuchalik/cordova-build-architecture.git#v1.0.4
 
 if [ -z "$AKS" ]; then
 
