@@ -4,9 +4,11 @@
 # 1. You will need android studio, pcregrep and zip installed
 # 2. To build release version specify a java keystore containing your upload certificate as the first argument, or no arguments to build debug apk
 # 3. This script was written and has only been tested on a mac, theoretically it should work on windows with gitbash or linux too
-# Version: 1.1
-# Date: 27 Sept 2019
+# Version: 1.2
+# Date: 13 Oct 2019
 # Author: Richard Holland
+# Changelog: 
+#   1.2 - support arm x64 for Google Play store, fix xwalk versioning bug
 
 export AKS=
 if [ -z "$1" ]; then
@@ -113,36 +115,44 @@ echo 'android {
     flavorDimensions "default"
 }' > platforms/android/build-extras.gradle
 
+phonegap prepare android
 
-phonegap plugin add https://github.com/MBuchalik/cordova-build-architecture.git#v1.0.4
+#fix versioning bug in crosswalk
+cat platforms/android/cordova-plugin-crosswalk-webview/core-xwalk.gradle | sed 's/versionCode defaultConfig.versionCode /versionCode defaultConfig.versionCode*10 /g' > platforms/android/cordova-plugin-crosswalk-webview/core-xwalk.gradle_
+mv platforms/android/cordova-plugin-crosswalk-webview/core-xwalk.gradle_ platforms/android/cordova-plugin-crosswalk-webview/core-xwalk.gradle
+
 
 if [ -z "$AKS" ]; then
 
 #build debug
-phonegap build android --debug 
+phonegap build android --debug
+phonegap build android --debug --xwalk64bit
 
 #if we were only doing a debug build we're finished now
-echo 'Debug build should be in ' $TWC/platforms/android/build/outputs/apk/armv7/debug
+echo 'Debug build should be in ' $TWC/platforms/android/build/outputs/apk/*/debug
 
 else
 
-#this is a release build... the fun is only just getting started
+export BTYPE=arm64
 
 #build release
 phonegap build android --release
+phonegap build android --release --xwalk64bit
 
+for BTYPE in arm64 armv7
+do
 #we need to align and sign the release apk
-RBD=$TWC/platforms/android/build/outputs/apk/armv7/release
+RBD=$TWC/platforms/android/build/outputs/apk/$BTYPE/release
 
 #remove the existing manifest from the unsigned release apk
-zip -d $RBD/android-armv7-release-unsigned.apk META-INF/*
+zip -d $RBD/android-$BTYPE-release-unsigned.apk META-INF/*
 
 #align
-$ZIPALIGN -v 4 $RBD/android-armv7-release-unsigned.apk $RBD/android-armv7-release-unsigned-aligned.apk
+$ZIPALIGN -v 4 $RBD/android-$BTYPE-release-unsigned.apk $RBD/android-$BTYPE-release-unsigned-aligned.apk
 
 #sign
-$APKSIGNER sign -ks $AKS --out $RBD/android-armv7-release-signed.apk $RBD/android-armv7-release-unsigned-aligned.apk
+$APKSIGNER sign -ks $AKS --out $RBD/android-$BTYPE-release-signed.apk $RBD/android-$BTYPE-release-unsigned-aligned.apk
 
-echo 'If all went well your signed and aligned released apk should be here: ' $RBD/android-armv7-release-signed.apk
-
+echo 'If all went well your signed and aligned released apk should be here: ' $RBD/android-$BTYPE-release-signed.apk
+done
 fi
